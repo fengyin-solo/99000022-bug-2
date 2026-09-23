@@ -40,7 +40,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { ElMessage } from 'element-plus'
@@ -51,6 +51,12 @@ const route = useRoute()
 const authStore = useAuthStore()
 
 const searchQuery = ref(route.query.search || '')
+
+// URL 是搜索条件的唯一数据源：标签切换、浏览器前进 / 后退等导致 query 变化时，
+// 输入框保持同步，避免输入框与列表实际条件不一致
+watch(() => route.query.search, (search) => {
+  searchQuery.value = search || ''
+})
 
 function goHome() {
   router.push('/')
