@@ -78,7 +78,12 @@ async function fetchArticle() {
 }
 
 function goBack() {
-  router.push('/')
+  // 从列表进入时返回上一页，保留搜索/标签/页码状态；直接打开详情页时回首页
+  if (window.history.state?.back) {
+    router.back()
+  } else {
+    router.push('/')
+  }
 }
 
 function formatDate(dateStr) {

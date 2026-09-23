@@ -40,7 +40,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { ElMessage } from 'element-plus'
@@ -51,6 +51,11 @@ const route = useRoute()
 const authStore = useAuthStore()
 
 const searchQuery = ref(route.query.search || '')
+
+// 路由中的搜索词变化时同步输入框（例如首页关闭搜索标签后，输入框不残留旧词）
+watch(() => route.query.search, (val) => {
+  searchQuery.value = val || ''
+})
 
 function goHome() {
   router.push('/')
@@ -72,9 +77,12 @@ function handleLogout() {
 
 function handleSearch() {
   const query = searchQuery.value.trim()
-  if (query) {
-    router.push({ path: '/', query: { search: query } })
+  if (!query) return
+  // 相同条件的重复搜索直接忽略，避免重复导航
+  if (route.path === '/' && route.query.search === query && !route.query.tag && !route.query.page) {
+    return
   }
+  router.push({ path: '/', query: { search: query } })
 }
 
 function handleClear() {

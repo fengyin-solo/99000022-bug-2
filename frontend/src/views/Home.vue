@@ -8,27 +8,32 @@
             搜索: {{ searchQuery }}
           </el-tag>
         </h2>
-        
+
         <div v-loading="loading">
-          <ArticleCard
-            v-for="article in articles"
-            :key="article.id"
-            :article="article"
-            :highlight-query="searchQuery"
-            @tag-click="handleTagSelect"
-          />
-          
-          <el-empty v-if="!loading && articles.length === 0" :description="emptyDescription" />
+          <template v-if="!loadError">
+            <ArticleCard
+              v-for="article in articles"
+              :key="article.id"
+              :article="article"
+              :highlight-query="searchQuery"
+              @tag-click="handleTagSelect"
+            />
+          </template>
+
+          <el-empty v-if="!loading && loadError" description="文章加载失败，请稍后重试">
+            <el-button type="primary" @click="retryFetch">重试</el-button>
+          </el-empty>
+          <el-empty v-else-if="!loading && articles.length === 0" :description="emptyDescription" />
         </div>
-        
+
         <Pagination
-          v-model="currentPage"
+          :model-value="currentPage"
           :total="pagination.total"
           :page-size="pagination.limit"
           @change="handlePageChange"
         />
       </el-col>
-      
+
       <el-col :span="6">
         <TagFilter
           :tags="tags"
@@ -54,15 +59,26 @@ const router = useRouter()
 const articles = ref([])
 const tags = ref([])
 const loading = ref(false)
-const selectedTag = ref(null)
-const searchQuery = ref('')
-const currentPage = ref(1)
+const loadError = ref(false)
 const pagination = ref({
   total: 0,
   page: 1,
   limit: 10,
   totalPages: 0
 })
+
+// 查询条件以路由 query 为唯一事实来源，搜索/标签/分页三个入口都只修改 URL
+const selectedTag = computed(() => normalizeQueryValue(route.query.tag))
+const searchQuery = computed(() => normalizeQueryValue(route.query.search) || '')
+const currentPage = computed(() => {
+  const page = parseInt(normalizeQueryValue(route.query.page), 10)
+  return Number.isInteger(page) && page > 0 ? page : 1
+})
+
+function normalizeQueryValue(value) {
+  if (Array.isArray(value)) return value[0] ?? null
+  return value ?? null
+}
 
 const pageTitle = computed(() => {
   if (searchQuery.value) {
@@ -78,30 +94,14 @@ const emptyDescription = computed(() => {
   return '暂无文章'
 })
 
-onMounted(() => {
-  if (route.query.tag) {
-    selectedTag.value = route.query.tag
-  }
-  if (route.query.search) {
-    searchQuery.value = route.query.search
-  }
-  fetchArticles()
-  fetchTags()
-})
-
-watch(() => route.query, (newQuery) => {
-  if (newQuery.tag !== selectedTag.value) {
-    selectedTag.value = newQuery.tag || null
-  }
-  if (newQuery.search !== searchQuery.value) {
-    searchQuery.value = newQuery.search || ''
-  }
-  currentPage.value = 1
-  fetchArticles()
-})
+// 请求序号：只有最新一次请求允许写入列表与分页，
+// 避免快速切换条件时旧条件的响应覆盖新结果
+let fetchSeq = 0
 
 async function fetchArticles() {
+  const seq = ++fetchSeq
   loading.value = true
+  loadError.value = false
   try {
     const params = {
       page: currentPage.value,
@@ -113,16 +113,35 @@ async function fetchArticles() {
     if (searchQuery.value) {
       params.search = searchQuery.value
     }
-    
+
     const response = await api.get('/articles', { params })
+    if (seq !== fetchSeq) return
     articles.value = response.data.articles
     pagination.value = response.data.pagination
   } catch (error) {
+    if (seq !== fetchSeq) return
     console.error('Failed to fetch articles:', error)
+    // 失败时清空数据并进入可识别的错误态，而不是继续展示上一次的结果
+    articles.value = []
+    pagination.value = { total: 0, page: 1, limit: 10, totalPages: 0 }
+    loadError.value = true
   } finally {
-    loading.value = false
+    if (seq === fetchSeq) {
+      loading.value = false
+    }
   }
 }
+
+// 路由 query 变化（搜索、标签、分页、前进后退）是触发请求的唯一入口
+watch(
+  () => [route.query.tag, route.query.search, route.query.page],
+  fetchArticles,
+  { immediate: true }
+)
+
+onMounted(() => {
+  fetchTags()
+})
 
 async function fetchTags() {
   try {
@@ -133,27 +152,37 @@ async function fetchTags() {
   }
 }
 
+// 所有条件变更统一收敛为一次路由导航，由上面的 watch 发起请求
+function navigateWithQuery({ tag = selectedTag.value, search = searchQuery.value, page = 1 } = {}) {
+  const query = {}
+  if (tag) query.tag = tag
+  if (search) query.search = search
+  if (page > 1) query.page = String(page)
+  // 条件未变化时无需导航（避免重复导航告警）
+  if (
+    query.tag === (route.query.tag || undefined) &&
+    query.search === (route.query.search || undefined) &&
+    query.page === (route.query.page || undefined)
+  ) {
+    return
+  }
+  router.push({ query })
+}
+
 function handlePageChange(page) {
-  currentPage.value = page
-  fetchArticles()
+  navigateWithQuery({ page })
 }
 
 function handleTagSelect(tag) {
-  selectedTag.value = tag
-  currentPage.value = 1
-  
-  const query = {}
-  if (tag) query.tag = tag
-  if (searchQuery.value) query.search = searchQuery.value
-  
-  router.replace({ query })
-  fetchArticles()
+  navigateWithQuery({ tag, page: 1 })
 }
 
 function clearSearch() {
-  const query = {}
-  if (selectedTag.value) query.tag = selectedTag.value
-  router.replace({ query })
+  navigateWithQuery({ search: '', page: 1 })
+}
+
+function retryFetch() {
+  fetchArticles()
 }
 </script>
 
